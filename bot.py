@@ -1926,13 +1926,16 @@ async def admin_all_pending(message: Message):
 
 # ---------- Startup ----------
 async def main():
-  await  init_panel_table()
-  application.add_handler(panel_conv_handler)
-  global BOT_USERNAME
-   if not config.BOT_TOKEN:
-  raise RuntimeError("BOT_TOKEN تنظیم نشده! متغیر محیطی BOT_TOKEN رو ست کنید.")
-  if not config.ADMIN_IDS:
-  logging.warning("ADMIN_IDS تنظیم نشده! هیچ ادمینی سفارش‌ها رو دریافت نمی‌کنه.")
+    await init_panel_table()
+    application.add_handler(panel_conv_handler)
+
+    global BOT_USERNAME
+
+    if not config.BOT_TOKEN:
+        raise RuntimeError("BOT_TOKEN تنظیم نشده! متغیر محیطی BOT_TOKEN رو ست کنید.")
+
+    if not config.ADMIN_IDS:
+        logging.warning("ADMIN_IDS تنظیم نشده! هیچ ادمینی سفارش‌ها رو دریافت نمی‌کنه.")
 
     await db.init_db()
     await bot.delete_webhook(drop_pending_updates=True)
@@ -1944,11 +1947,11 @@ async def main():
     await dp.start_polling(bot)
 
 
-if __name__ == "__main__":init_panel_table()
+if __name__ == "__main__":
     asyncio.run(main())
+
 # استیت‌های مربوط به تنظیم پنل
 PANEL_URL, PANEL_USER, PANEL_PASS = range(100, 103)
-
 async def start_panel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
