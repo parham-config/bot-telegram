@@ -49,8 +49,10 @@ class PasargadAPI:
                 return config_link, None
             else:
                 return None, f"خطا از سمت پنل: {res.text}"
-        except Exception as e:
-            return None, f"خطا در ارسال درخواست: {str(e)}"DEFAULT_PROXIES: dict[str, dict] = {
+     except Exception as e:
+    return None, f"خطا در ارسال درخواست: {str(e)}"
+
+DEFAULT_PROXIES: dict[str, dict] = {
     "vless": {"flow": ""},
     "vmess": {},
     "trojan": {},
