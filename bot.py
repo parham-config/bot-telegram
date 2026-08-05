@@ -1,7 +1,9 @@
 import asyncio
 import logging
 from time import monotonic
-
+from pasargad_api import PasargadAPI
+from database import save_panel_settings, get_active_panel, init_panel_table
+from telegram.ext import ConversationHandler
 from aiogram import Bot, Dispatcher, F, BaseMiddleware
 from aiogram.filters import Command, CommandStart, CommandObject
 from aiogram.fsm.context import FSMContext
@@ -1941,3 +1943,77 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+# استیت‌های مربوط به تنظیم پنل
+PANEL_URL, PANEL_USER, PANEL_PASS = range(100, 103)
+
+async def start_panel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text("آدرس کامل پنل پاسارگاد را وارد کنید:\nمثال: https://panel.example.com:8080")
+    return PANEL_URL
+
+async def get_panel_url(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['panel_url'] = update.message.text.strip()
+    await update.message.reply_text("نام کاربری (Username) ادمین پنل را وارد کنید:")
+    return PANEL_USER
+
+async def get_panel_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data['panel_user'] = update.message.text.strip()
+    await update.message.reply_text("رمز عبور (Password) پنل را وارد کنید:")
+    return PANEL_PASS
+
+async def get_panel_pass(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    panel_pass = update.message.text.strip()
+    panel_url = context.user_data['panel_url']
+    panel_user = context.user_data['panel_user']
+
+    await update.message.reply_text("⏳ در حال بررسی و تست اتصال به پنل...")
+
+    api = PasargadAPI(panel_url, panel_user, panel_pass)
+    success, msg = api.login()
+
+    if success:
+        save_panel_settings(panel_url, panel_user, panel_pass)
+        await update.message.reply_text("✅ اتصال برقرار شد! اطلاعات پنل پاسارگاد با موفقیت ذخیره گردید.")
+    else:
+        await update.message.reply_text(f"❌ خطا در اتصال به پنل:\n{msg}\nلطفاً مجدداً تلاش کنید.")
+
+    return ConversationHandler.END
+
+async def cancel_panel_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("عملیات لغو شد.")
+    return ConversationHandler.END
+
+panel_conv_handler = ConversationHandler(
+    entry_points=[CallbackQueryHandler(start_panel_setup, pattern="^admin_set_panel$")],
+    states={
+        PANEL_URL: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_panel_url)],
+        PANEL_USER: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_panel_user)],
+        PANEL_PASS: [MessageHandler(filters.TEXT & ~filters.COMMAND, get_panel_pass)],
+    },
+    fallbacks=[CommandHandler("cancel", cancel_panel_setup)],
+)
+
+async def auto_approve_and_deliver_order(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, order_id: int, volume_gb: int, expire_days: int):
+    panel_info = get_active_panel()
+    if not panel_info:
+        await update.callback_query.message.reply_text("⚠️ هیچ پنل فعال پاسارگادی یافت نشد! ابتدا مشخصات پنل را در بخش مدیریت تنظیم کنید.")
+        return False
+
+    api = PasargadAPI(panel_info['url'], panel_info['username'], panel_info['password'])
+    client_username = f"usr_{user_id}_{order_id}"
+
+    config_link, error = api.create_user(client_username, volume_gb, expire_days)
+
+    if config_link:
+        message_text = (
+            f"🎉 **سفارش شما با موفقیت تحویل داده شد!**\n\n"
+            f"📌 **لینک کانفیگ اختصاصی شما:**\n"
+            f"`{config_link}`"
+        )
+        await context.bot.send_message(chat_id=user_id, text=message_text, parse_mode="Markdown")
+        await update.callback_query.message.reply_text("✅ سفارش تأیید شد و ساخت کانفیگ در پنل به صورت خودکار انجام گرفت.")
+        return True
+    else:
+        await update.callback_query.message.reply_text(f"❌ خطا در ساخت خودکار اکانت در پنل:\n{error}")
+        return False
