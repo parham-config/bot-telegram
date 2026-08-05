@@ -792,3 +792,47 @@ async def get_wallet_bonus_threshold() -> int:
 async def get_wallet_bonus_percent() -> int:
     val = await get_setting("wallet_bonus_percent")
     return int(val) if val is not None else 5
+import sqlite3
+from config import DB_PATH
+
+def get_connection():
+    return sqlite3.connect(DB_PATH)
+
+def init_panel_table():
+    """ساخت جدول نگهداری مشخصات پنل"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS panel_config (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            panel_url TEXT NOT NULL,
+            username TEXT NOT NULL,
+            password TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def save_panel_settings(panel_url, username, password):
+    """ذخیره یا به‌روزرسانی پنل پاسارگاد"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM panel_config")
+    cursor.execute('''
+        INSERT INTO panel_config (panel_url, username, password, is_active)
+        VALUES (?, ?, ?, 1)
+    ''', (panel_url, username, password))
+    conn.commit()
+    conn.close()
+
+def get_active_panel():
+    """دریافت اطلاعات پنل فعال"""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT panel_url, username, password FROM panel_config WHERE is_active = 1 LIMIT 1")
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return {"url": row[0], "username": row[1], "password": row[2]}
+    return None
