@@ -64,6 +64,16 @@ async def init_db():
         )
         await db.execute(
             """
+            CREATE TABLE IF NOT EXISTS single_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                label TEXT NOT NULL,
+                price INTEGER NOT NULL,
+                active INTEGER DEFAULT 1
+            )
+            """
+        )
+        await db.execute(
+            """
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT
@@ -179,6 +189,15 @@ async def init_db():
             for label, price in config.DEFAULT_MULTI_PLANS:
                 await db.execute(
                     "INSERT INTO multi_plans (label, price, active) VALUES (?, ?, 1)", (label, price)
+                )
+            await db.commit()
+
+        cursor = await db.execute("SELECT COUNT(*) FROM single_plans")
+        row = await cursor.fetchone()
+        if row[0] == 0:
+            for label, price in config.DEFAULT_SINGLE_PLANS:
+                await db.execute(
+                    "INSERT INTO single_plans (label, price, active) VALUES (?, ?, 1)", (label, price)
                 )
             await db.commit()
 
@@ -417,6 +436,43 @@ async def add_multi_plan(label: str, price: int):
         await db.commit()
 
 
+# ---------- Single-location plans (تعرفه سرویس تک لوکیشن) ----------
+async def get_single_plans(active_only: bool = True):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        query = "SELECT * FROM single_plans"
+        if active_only:
+            query += " WHERE active = 1"
+        query += " ORDER BY id ASC"
+        cursor = await db.execute(query)
+        return await cursor.fetchall()
+
+
+async def get_single_plan(plan_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
+        cursor = await db.execute("SELECT * FROM single_plans WHERE id = ?", (plan_id,))
+        return await cursor.fetchone()
+
+
+async def update_single_price(plan_id: int, new_price: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE single_plans SET price = ? WHERE id = ?", (new_price, plan_id))
+        await db.commit()
+
+
+async def toggle_single_active(plan_id: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("UPDATE single_plans SET active = 1 - active WHERE id = ?", (plan_id,))
+        await db.commit()
+
+
+async def add_single_plan(label: str, price: int):
+    async with aiosqlite.connect(DB_PATH) as db:
+        await db.execute("INSERT INTO single_plans (label, price, active) VALUES (?, ?, 1)", (label, price))
+        await db.commit()
+
+
 # ---------- Settings (تنظیمات پویا - قابل تغییر توسط ادمین از داخل ربات) ----------
 async def get_setting(key: str, default=None):
     async with aiosqlite.connect(DB_PATH) as db:
@@ -463,6 +519,27 @@ async def get_rules_text():
 
 async def set_rules_text(text: str) -> None:
     await set_setting("rules_text", text)
+
+
+# ---------- اطلاعات کارت پرداخت (قابل تغییر توسط ادمین از داخل ربات) ----------
+async def get_card_number() -> str:
+    import config
+    val = await get_setting("card_number")
+    return val if val is not None else config.CARD_NUMBER
+
+
+async def set_card_number(value: str) -> None:
+    await set_setting("card_number", value)
+
+
+async def get_card_holder() -> str:
+    import config
+    val = await get_setting("card_holder")
+    return val if val is not None else config.CARD_HOLDER
+
+
+async def set_card_holder(value: str) -> None:
+    await set_setting("card_holder", value)
 
 
 # ---------- Wallet (کیف پول) ----------
