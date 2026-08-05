@@ -1929,10 +1929,10 @@ async def main():
   await  init_panel_table()
   application.add_handler(panel_conv_handler)
   global BOT_USERNAME
-    if not config.BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN تنظیم نشده! متغیر محیطی BOT_TOKEN رو ست کنید.")
-    if not config.ADMIN_IDS:
-        logging.warning("ADMIN_IDS تنظیم نشده! هیچ ادمینی سفارش‌ها رو دریافت نمی‌کنه.")
+  if not config.BOT_TOKEN:
+  raise RuntimeError("BOT_TOKEN تنظیم نشده! متغیر محیطی BOT_TOKEN رو ست کنید.")
+  if not config.ADMIN_IDS:
+  logging.warning("ADMIN_IDS تنظیم نشده! هیچ ادمینی سفارش‌ها رو دریافت نمی‌کنه.")
 
     await db.init_db()
     await bot.delete_webhook(drop_pending_updates=True)
