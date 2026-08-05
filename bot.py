@@ -1927,7 +1927,7 @@ async def admin_all_pending(message: Message):
 # ---------- Startup ----------
 async def main():
   await  init_panel_table()
-     application.add_handler(panel_conv_handler)
+    application.add_handler(panel_conv_handler)
     global BOT_USERNAME
     if not config.BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN تنظیم نشده! متغیر محیطی BOT_TOKEN رو ست کنید.")
