@@ -72,6 +72,11 @@ class AdminStates(StatesGroup):
     adding_gaming_price = State()
     adding_multi_label = State()
     adding_multi_price = State()
+    editing_single_price = State()
+    adding_single_label = State()
+    adding_single_price = State()
+    editing_card_number = State()
+    editing_card_holder = State()
     editing_welcome_message = State()
     editing_referral_percent = State()
     editing_rules_text = State()
@@ -104,6 +109,7 @@ def services_kb() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="🎮 سرویس گیمینگ", callback_data="svc:gaming")],
         [InlineKeyboardButton(text="🌍 سرویس مولتی لوکیشن (وبگردی)", callback_data="svc:multi")],
+        [InlineKeyboardButton(text="📍 سرویس تک لوکیشن", callback_data="svc:single")],
         [InlineKeyboardButton(text="🔙 بازگشت به منو", callback_data="back:menu")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -134,9 +140,28 @@ def multi_plans_kb(plans) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def single_plans_kb(plans) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"{p['label']} - {p['price']:,} تومان", callback_data=f"splan:{p['id']}")]
+        for p in plans
+    ]
+    rows.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="back:services")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def order_kind(order) -> str:
+    """نوع سرویس یک سفارش رو بر اساس ایموجی ابتدای نام پلن تشخیص می‌ده."""
+    name = str(order["plan_name"])
+    if name.startswith("🎮"):
+        return "gaming"
+    if name.startswith("📍"):
+        return "single"
+    return "multi"
+
+
 async def build_order_summary_kb(order) -> InlineKeyboardMarkup:
     """کیبورد صفحه خلاصه سفارش: ارسال رسید، کد تخفیف، پرداخت با کیف پول (در صورت کافی بودن موجودی) یا بازگشت."""
-    kind = "gaming" if str(order["plan_name"]).startswith("🎮") else "multi"
+    kind = order_kind(order)
     rows = [[InlineKeyboardButton(text="📤 ارسال رسید", callback_data=f"reqreceipt:{order['id']}")]]
 
     if order["coupon_code"]:
@@ -167,7 +192,7 @@ def waiting_receipt_kb(order_id: int) -> InlineKeyboardMarkup:
     )
 
 
-def order_summary_text(order) -> str:
+async def order_summary_text(order) -> str:
     price_block = f"💰 قیمت: {order['price']:,} تومان"
     if order["coupon_code"]:
         price_block = (
@@ -175,14 +200,16 @@ def order_summary_text(order) -> str:
             f"🎟 کد تخفیف: {order['coupon_code']}\n"
             f"💰 قیمت نهایی: {order['price']:,} تومان"
         )
+    card_number = await db.get_card_number()
+    card_holder = await db.get_card_holder()
     return (
         f"🧾 <b>خلاصه سفارش شما</b>\n"
         f"—————————————\n"
         f"📦 {order['plan_name']}\n"
         f"{price_block}\n"
         f"—————————————\n\n"
-        f"💳 شماره کارت: <code>{config.CARD_NUMBER}</code>\n"
-        f"👤 به نام: {config.CARD_HOLDER}\n\n"
+        f"💳 شماره کارت: <code>{card_number}</code>\n"
+        f"👤 به نام: {card_holder}\n\n"
         f"ℹ️ پس از واریز وجه، روی دکمه «📤 ارسال رسید» بزنید و سپس عکس یا فایل رسید رو ارسال کنید."
     )
 
@@ -276,6 +303,16 @@ async def cancel_order_and_go_back(callback: CallbackQuery, state: FSMContext):
         await callback.message.edit_text(
             "🎮 <b>سرویس گیمینگ</b>\nحجم مورد نظر رو انتخاب کنید:", parse_mode="HTML", reply_markup=gaming_plans_kb(plans)
         )
+    elif kind == "single":
+        plans = await db.get_single_plans()
+        if not plans:
+            await callback.answer("در حال حاضر تعرفه‌ای برای این سرویس ثبت نشده.", show_alert=True)
+            return
+        await callback.message.edit_text(
+            "📍 <b>سرویس تک لوکیشن</b>\nتعرفه مورد نظر رو انتخاب کنید:",
+            parse_mode="HTML",
+            reply_markup=single_plans_kb(plans),
+        )
     else:
         plans = await db.get_multi_plans()
         if not plans:
@@ -337,7 +374,7 @@ async def choose_gaming_plan(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     order = await db.get_order(order_id)
     await callback.message.edit_text(
-        order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
+        await order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
     )
     await callback.answer()
 
@@ -364,7 +401,48 @@ async def choose_multi_plan(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     order = await db.get_order(order_id)
     await callback.message.edit_text(
-        order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
+        await order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "svc:single")
+async def choose_single_service(callback: CallbackQuery, state: FSMContext):
+    plans = await db.get_single_plans()
+    if not plans:
+        await callback.answer("در حال حاضر تعرفه‌ای برای این سرویس ثبت نشده.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📍 <b>سرویس تک لوکیشن</b>\nتعرفه مورد نظر رو انتخاب کنید:",
+        parse_mode="HTML",
+        reply_markup=single_plans_kb(plans),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("splan:"))
+async def choose_single_plan(callback: CallbackQuery, state: FSMContext):
+    plan_id = int(callback.data.split(":")[1])
+    plan = await db.get_single_plan(plan_id)
+    if not plan or not plan["active"]:
+        await callback.answer("این تعرفه دیگر موجود نیست.", show_alert=True)
+        return
+
+    plan_name = f"📍 سرویس تک لوکیشن - {plan['label']}"
+
+    order_id = await db.create_order(
+        user_id=callback.from_user.id,
+        username=callback.from_user.username or "",
+        full_name=callback.from_user.full_name,
+        plan_id=plan_id,
+        plan_name=plan_name,
+        price=plan["price"],
+    )
+
+    await state.clear()
+    order = await db.get_order(order_id)
+    await callback.message.edit_text(
+        await order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
     )
     await callback.answer()
 
@@ -400,7 +478,7 @@ async def back_to_order_summary(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.message.edit_text(
-        order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
+        await order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
     )
     await callback.answer()
 
@@ -457,7 +535,7 @@ async def apply_coupon_code(message: Message, state: FSMContext):
         f"✅ کد تخفیف {code} ({coupon['percent']}٪) با موفقیت اعمال شد!",
     )
     await message.answer(
-        order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
+        await order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
     )
 
 
@@ -473,7 +551,7 @@ async def remove_coupon(callback: CallbackQuery, state: FSMContext):
     await state.clear()
     order = await db.get_order(order_id)
     await callback.message.edit_text(
-        order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
+        await order_summary_text(order), parse_mode="HTML", reply_markup=await build_order_summary_kb(order)
     )
     await callback.answer("کد تخفیف حذف شد.")
 
@@ -654,14 +732,16 @@ async def back_to_my_orders_list(callback: CallbackQuery):
     await callback.answer()
 
 
-def topup_summary_text(topup) -> str:
+async def topup_summary_text(topup) -> str:
+    card_number = await db.get_card_number()
+    card_holder = await db.get_card_holder()
     return (
         f"🧾 <b>شارژ کیف پول</b>\n"
         f"—————————————\n"
         f"💰 مبلغ: {topup['amount']:,} تومان\n"
         f"—————————————\n\n"
-        f"💳 شماره کارت: <code>{config.CARD_NUMBER}</code>\n"
-        f"👤 به نام: {config.CARD_HOLDER}\n\n"
+        f"💳 شماره کارت: <code>{card_number}</code>\n"
+        f"👤 به نام: {card_holder}\n\n"
         f"ℹ️ پس از واریز وجه، روی دکمه «📤 ارسال رسید» بزنید و سپس عکس یا فایل رسید رو ارسال کنید."
     )
 
@@ -739,7 +819,7 @@ async def receive_topup_amount(message: Message, state: FSMContext):
     )
     await state.clear()
     topup = await db.get_wallet_topup(topup_id)
-    await message.answer(topup_summary_text(topup), parse_mode="HTML", reply_markup=topup_summary_kb(topup_id))
+    await message.answer(await topup_summary_text(topup), parse_mode="HTML", reply_markup=topup_summary_kb(topup_id))
 
 
 @dp.callback_query(F.data.startswith("topupcancel:"))
@@ -783,7 +863,7 @@ async def back_to_topup_summary(callback: CallbackQuery, state: FSMContext):
 
     await state.clear()
     await callback.message.edit_text(
-        topup_summary_text(topup), parse_mode="HTML", reply_markup=topup_summary_kb(topup_id)
+        await topup_summary_text(topup), parse_mode="HTML", reply_markup=topup_summary_kb(topup_id)
     )
     await callback.answer()
 
@@ -969,6 +1049,8 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(text="🎮 تعرفه‌های گیمینگ", callback_data="admintariff:gaming")],
             [InlineKeyboardButton(text="🌍 تعرفه‌های مولتی لوکیشن", callback_data="admintariff:multi")],
+            [InlineKeyboardButton(text="📍 تعرفه‌های تک لوکیشن", callback_data="admintariff:single")],
+            [InlineKeyboardButton(text="💳 اطلاعات کارت پرداخت", callback_data="admincard")],
             [InlineKeyboardButton(text="✉️ پیام خوش‌آمدگویی", callback_data="adminwelcome")],
             [InlineKeyboardButton(text="📜 ویرایش قوانین", callback_data="adminrules")],
             [InlineKeyboardButton(text="🎟 کدهای تخفیف", callback_data="admincoupons")],
@@ -1021,6 +1103,38 @@ async def multi_admin_list_kb() -> InlineKeyboardMarkup:
     rows.append([InlineKeyboardButton(text="➕ افزودن تعرفه جدید", callback_data="madd")])
     rows.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="admintariff:root")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def single_admin_list_kb() -> InlineKeyboardMarkup:
+    plans = await db.get_single_plans(active_only=False)
+    rows = []
+    for p in plans:
+        status = "✅" if p["active"] else "🚫"
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{status} {p['label']} - {p['price']:,} تومان",
+                    callback_data=f"spriceedit:{p['id']}",
+                ),
+                InlineKeyboardButton(
+                    text="غیرفعال" if p["active"] else "فعال",
+                    callback_data=f"stoggle:{p['id']}",
+                ),
+            ]
+        )
+    rows.append([InlineKeyboardButton(text="➕ افزودن تعرفه جدید", callback_data="sadd")])
+    rows.append([InlineKeyboardButton(text="🔙 بازگشت", callback_data="admintariff:root")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def card_settings_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✏️ تغییر شماره کارت", callback_data="editcardnumber")],
+            [InlineKeyboardButton(text="✏️ تغییر نام صاحب کارت", callback_data="editcardholder")],
+            [InlineKeyboardButton(text="🔙 بازگشت", callback_data="admintariff:root")],
+        ]
+    )
 
 
 ADMIN_ROOT_TEXT = "⚙️ <b>مدیریت ربات</b>\nچی رو می‌خواید تنظیم کنید؟"
@@ -1540,6 +1654,157 @@ async def add_multi_price(message: Message, state: FSMContext):
     await db.add_multi_plan(label, int(text))
     await state.clear()
     await message.answer("✅ تعرفه جدید اضافه شد.", reply_markup=await multi_admin_list_kb())
+
+
+@dp.callback_query(F.data == "admintariff:single")
+async def admintariff_single(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید.", show_alert=True)
+        return
+    await callback.message.edit_text(
+        "📍 <b>تعرفه‌های سرویس تک لوکیشن</b>\nروی هر تعرفه بزنید تا قیمتش رو تغییر بدید، یا فعال/غیرفعالش کنید:",
+        parse_mode="HTML",
+        reply_markup=await single_admin_list_kb(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data.startswith("stoggle:"))
+async def toggle_single(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید.", show_alert=True)
+        return
+    plan_id = int(callback.data.split(":")[1])
+    await db.toggle_single_active(plan_id)
+    await callback.message.edit_reply_markup(reply_markup=await single_admin_list_kb())
+    await callback.answer("وضعیت تعرفه تغییر کرد.")
+
+
+@dp.callback_query(F.data.startswith("spriceedit:"))
+async def start_edit_single_price(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید.", show_alert=True)
+        return
+    plan_id = int(callback.data.split(":")[1])
+    plan = await db.get_single_plan(plan_id)
+    if not plan:
+        await callback.answer("این تعرفه پیدا نشد.", show_alert=True)
+        return
+    await state.update_data(plan_id=plan_id)
+    await state.set_state(AdminStates.editing_single_price)
+    await callback.message.answer(
+        f"قیمت جدید برای «{plan['label']}» رو به تومان بفرستید (فقط عدد):"
+    )
+    await callback.answer()
+
+
+@dp.message(AdminStates.editing_single_price)
+async def save_single_price(message: Message, state: FSMContext):
+    text = (message.text or "").replace(",", "").strip()
+    if not text.isdigit():
+        await message.answer("لطفاً فقط عدد بفرستید (مثال: 120000)")
+        return
+    data = await state.get_data()
+    plan_id = data.get("plan_id")
+    await db.update_single_price(plan_id, int(text))
+    await state.clear()
+    await message.answer("✅ قیمت با موفقیت بروزرسانی شد.", reply_markup=await single_admin_list_kb())
+
+
+@dp.callback_query(F.data == "sadd")
+async def start_add_single(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید.", show_alert=True)
+        return
+    await state.set_state(AdminStates.adding_single_label)
+    await callback.message.answer("عنوان تعرفه جدید رو بفرستید (مثال: تک کاربره نامحدود یک‌ماهه):")
+    await callback.answer()
+
+
+@dp.message(AdminStates.adding_single_label)
+async def add_single_label(message: Message, state: FSMContext):
+    label = (message.text or "").strip()
+    if not label:
+        await message.answer("لطفاً یه عنوان معتبر بفرستید.")
+        return
+    await state.update_data(label=label)
+    await state.set_state(AdminStates.adding_single_price)
+    await message.answer("حالا قیمت این تعرفه رو به تومان بفرستید:")
+
+
+@dp.message(AdminStates.adding_single_price)
+async def add_single_price(message: Message, state: FSMContext):
+    text = (message.text or "").replace(",", "").strip()
+    if not text.isdigit():
+        await message.answer("لطفاً فقط عدد بفرستید (مثال: 150000)")
+        return
+    data = await state.get_data()
+    label = data.get("label")
+    await db.add_single_plan(label, int(text))
+    await state.clear()
+    await message.answer("✅ تعرفه جدید اضافه شد.", reply_markup=await single_admin_list_kb())
+
+
+# ---------- Admin: اطلاعات کارت پرداخت ----------
+@dp.callback_query(F.data == "admincard")
+async def admin_card_settings(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید.", show_alert=True)
+        return
+    await state.clear()
+    card_number = await db.get_card_number()
+    card_holder = await db.get_card_holder()
+    await callback.message.edit_text(
+        f"💳 <b>اطلاعات کارت پرداخت فعلی</b>\n\n"
+        f"شماره کارت: <code>{card_number}</code>\n"
+        f"نام صاحب کارت: {card_holder}\n\n"
+        f"کدوم رو می‌خواید تغییر بدید؟",
+        parse_mode="HTML",
+        reply_markup=card_settings_kb(),
+    )
+    await callback.answer()
+
+
+@dp.callback_query(F.data == "editcardnumber")
+async def start_edit_card_number(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید.", show_alert=True)
+        return
+    await state.set_state(AdminStates.editing_card_number)
+    await callback.message.answer("شماره کارت جدید رو بفرستید (مثال: 6037-xxxx-xxxx-xxxx):")
+    await callback.answer()
+
+
+@dp.message(AdminStates.editing_card_number)
+async def save_card_number(message: Message, state: FSMContext):
+    value = (message.text or "").strip()
+    if not value:
+        await message.answer("لطفاً یه مقدار معتبر بفرستید.")
+        return
+    await db.set_card_number(value)
+    await state.clear()
+    await message.answer("✅ شماره کارت با موفقیت بروزرسانی شد.", reply_markup=card_settings_kb())
+
+
+@dp.callback_query(F.data == "editcardholder")
+async def start_edit_card_holder(callback: CallbackQuery, state: FSMContext):
+    if callback.from_user.id not in config.ADMIN_IDS:
+        await callback.answer("شما دسترسی ادمین ندارید.", show_alert=True)
+        return
+    await state.set_state(AdminStates.editing_card_holder)
+    await callback.message.answer("نام جدید صاحب کارت رو بفرستید:")
+    await callback.answer()
+
+
+@dp.message(AdminStates.editing_card_holder)
+async def save_card_holder(message: Message, state: FSMContext):
+    value = (message.text or "").strip()
+    if not value:
+        await message.answer("لطفاً یه مقدار معتبر بفرستید.")
+        return
+    await db.set_card_holder(value)
+    await state.clear()
+    await message.answer("✅ نام صاحب کارت با موفقیت بروزرسانی شد.", reply_markup=card_settings_kb())
 
 
 # ---------- Admin handlers ----------
