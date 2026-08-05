@@ -1059,6 +1059,7 @@ def admin_menu_kb() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="🤝 تنظیمات رفرال", callback_data="adminreferral")],
             [InlineKeyboardButton(text="💳 تخفیف شارژ کیف پول", callback_data="adminwalletbonus")],
             [InlineKeyboardButton(text="🔙 بازگشت به منو", callback_data="back:menu")],
+            [InlineKeyboardButton("🔌 تنظیمات پنل پاسارگاد", callback_data="admin_set_panel")],
         ]
     )
 
@@ -1925,6 +1926,8 @@ async def admin_all_pending(message: Message):
 
 # ---------- Startup ----------
 async def main():
+  await  init_panel_table()
+     application.add_handler(panel_conv_handler)
     global BOT_USERNAME
     if not config.BOT_TOKEN:
         raise RuntimeError("BOT_TOKEN تنظیم نشده! متغیر محیطی BOT_TOKEN رو ست کنید.")
@@ -1941,7 +1944,7 @@ async def main():
     await dp.start_polling(bot)
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":init_panel_table()
     asyncio.run(main())
 # استیت‌های مربوط به تنظیم پنل
 PANEL_URL, PANEL_USER, PANEL_PASS = range(100, 103)
