@@ -1,40 +1,56 @@
-"""
-کلاینت ارتباط با پنل پاسارگاد (Pasargad Panel)
+import requests
 
-پنل پاسارگاد روی FastAPI و با احراز هویت OAuth2 (توکن) کار می‌کنه و ساختار
-اند‌پوینت‌هاش با مرزبان (Marzban) سازگاره:
+class PasargadAPI:
+    def __init__(self, panel_url, username, password):
+        self.panel_url = panel_url.rstrip('/')
+        self.username = username
+        self.password = password
+        self.session = requests.Session()
+        self.token = None
 
-    POST /api/admin/token      -> گرفتن access_token (form-data)
-    POST /api/user             -> ساخت کاربر جدید
-    GET  /api/user/{username}  -> اطلاعات و مصرف کاربر
-    PUT  /api/user/{username}  -> ویرایش/تمدید کاربر
-    DELETE /api/user/{username}
-    POST /api/user/{username}/reset
-    GET  /api/inbounds , GET /api/system
+    def login(self):
+        """احراز هویت و دریافت توکن از پنل پاسارگاد"""
+        url = f"{self.panel_url}/api/admin/token"
+        payload = {
+            'username': self.username,
+            'password': self.password
+        }
+        try:
+            response = self.session.post(url, data=payload, timeout=10)
+            if response.status_code == 200:
+                data = response.json()
+                self.token = data.get('access_token')
+                self.session.headers.update({'Authorization': f'Bearer {self.token}'})
+                return True, "اتصال با موفقیت برقرار شد."
+            return False, f"خطا در ورود (کد {response.status_code})"
+        except Exception as e:
+            return False, f"خطا در ارتباط با سرور: {str(e)}"
 
-اگه نسخه‌ی پنل شما اند‌پوینت متفاوتی داره، فقط مقدار ثابت‌های بالای کلاس
-(TOKEN_PATH / USER_PATH) یا payload تابع create_user رو عوض کنید.
-"""
+    def create_user(self, client_username, volume_gb, expire_days):
+        """ساخت کاربر جدید و دریافت لینک کانفیگ"""
+        success, msg = self.login()
+        if not success:
+            return None, msg
 
-from __future__ import annotations
+        url = f"{self.panel_url}/api/user/add"
+        bytes_limit = int(volume_gb) * 1024 * 1024 * 1024
+        
+        payload = {
+            "username": client_username,
+            "data_limit": bytes_limit,
+            "expire_days": int(expire_days)
+        }
 
-import asyncio
-import json
-import logging
-import random
-import re
-import string
-import time
-from typing import Any
-
-import aiohttp
-
-logger = logging.getLogger(__name__)
-
-GB = 1024 ** 3
-
-# پروکسی‌های پیش‌فرضی که موقع ساخت اکانت برای کاربر فعال میشن
-DEFAULT_PROXIES: dict[str, dict] = {
+        try:
+            res = self.session.post(url, json=payload, timeout=15)
+            if res.status_code in [200, 201]:
+                res_data = res.json()
+                config_link = res_data.get("subscription_url") or res_data.get("link")
+                return config_link, None
+            else:
+                return None, f"خطا از سمت پنل: {res.text}"
+        except Exception as e:
+            return None, f"خطا در ارسال درخواست: {str(e)}"DEFAULT_PROXIES: dict[str, dict] = {
     "vless": {"flow": ""},
     "vmess": {},
     "trojan": {},
