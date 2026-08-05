@@ -1,56 +1,25 @@
-import requests
+"""
+کلاینت async برای اتصال به پنل پاسارگاد (Marzban / سازگار با API مشابه).
 
-class PasargadAPI:
-    def __init__(self, panel_url, username, password):
-        self.panel_url = panel_url.rstrip('/')
-        self.username = username
-        self.password = password
-        self.session = requests.Session()
-        self.token = None
+قابلیت‌ها:
+    - احراز هویت و کش کردن توکن
+    - ساخت / خواندن / ویرایش / حذف / تمدید / ریست مصرف کاربر
+    - خواندن آمار سیستم و اینباندهای پنل
+    - تست اتصال
+    - کش کلاینت‌ها بر اساس (آدرس پنل، یوزرنیم، پسورد, ...) تا توکن بین درخواست‌ها حفظ بشه
+"""
 
-    def login(self):
-        """احراز هویت و دریافت توکن از پنل پاسارگاد"""
-        url = f"{self.panel_url}/api/admin/token"
-        payload = {
-            'username': self.username,
-            'password': self.password
-        }
-        try:
-            response = self.session.post(url, data=payload, timeout=10)
-            if response.status_code == 200:
-                data = response.json()
-                self.token = data.get('access_token')
-                self.session.headers.update({'Authorization': f'Bearer {self.token}'})
-                return True, "اتصال با موفقیت برقرار شد."
-            return False, f"خطا در ورود (کد {response.status_code})"
-        except Exception as e:
-            return False, f"خطا در ارتباط با سرور: {str(e)}"
+import asyncio
+import json
+import random
+import re
+import string
+import time
+from typing import Any
 
-    def create_user(self, client_username, volume_gb, expire_days):
-        """ساخت کاربر جدید و دریافت لینک کانفیگ"""
-        success, msg = self.login()
-        if not success:
-            return None, msg
+import aiohttp
 
-        url = f"{self.panel_url}/api/user/add"
-        bytes_limit = int(volume_gb) * 1024 * 1024 * 1024
-        
-        payload = {
-            "username": client_username,
-            "data_limit": bytes_limit,
-            "expire_days": int(expire_days)
-        }
-
-        try:
-            res = self.session.post(url, json=payload, timeout=15)
-            if res.status_code in [200, 201]:
-                res_data = res.json()
-                config_link = res_data.get("subscription_url") or res_data.get("link")
-                return config_link, None
-            else:
-                return None, f"خطا از سمت پنل: {res.text}"
-     except Exception as e:
-    return None, f"خطا در ارسال درخواست: {str(e)}"
+GB = 1024 * 1024 * 1024
 
 DEFAULT_PROXIES: dict[str, dict] = {
     "vless": {"flow": ""},
@@ -402,7 +371,7 @@ def _short_error(text: str) -> str:
 
 
 # ---------- کش کلاینت‌ها (برای اینکه توکن بین درخواست‌ها حفظ بشه) ----------
-_clients: dict[tuple, PasargadAPI] = {}
+_clients: dict[tuple, "PasargadAPI"] = {}
 
 
 def get_client(
